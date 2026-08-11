@@ -1,50 +1,45 @@
 import os
-import glob
-from pypdf import PdfReader
 import chromadb
-from chromadb.utils import embedding_functions
+from sentence_transformers import SentenceTransformer
+from pypdf import PdfReader
 
-# Initialize Vector DB
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
-sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
-)
+EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+chroma_client = chromadb.Client()
+collection = chroma_client.get_or_create_collection(name="qa_reference_docs")
 
-collection = chroma_client.get_or_create_collection(
-    name="qa_reference_docs",
-    embedding_function=sentence_transformer_ef
-)
-
-def load_reference_documents(docs_folder: str = "supporting_assets/02_ai_document_qa_reviewer"):
-    """Loads all PDFs in product_docs, policies, and approved_content."""
+def load_documents(folder_path="supporting_assets/02_ai_document_qa_reviewer"):
     if collection.count() > 0:
-        return  # Already loaded
+        return
 
-    pdf_files = glob.glob(f"{docs_folder}/**/*.pdf", recursive=True)
-    
-    for pdf_path in pdf_files:
-        filename = os.path.basename(pdf_path)
-        reader = PdfReader(pdf_path)
-        
-        for idx, page in enumerate(reader.pages):
-            text = page.extract_text()
-            if text and text.strip():
-                # Store text chunks with metadata
-                collection.add(
-                    documents=[text],
-                    metadatas=[{"source": filename, "page": idx + 1}],
-                    ids=[f"{filename}_p{idx+1}"]
-                )
+    doc_id = 0
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            if file.endswith(".pdf"):
+                file_path = os.path.join(root, file)
+                reader = PdfReader(file_path)
+                text = ""
+                for page in reader.pages:
+                    text += page.extract_text() or ""
+                
+                chunks = [c.strip() for c in text.split("\n\n") if len(c.strip()) > 20]
+                for chunk in chunks:
+                    embedding = EMBED_MODEL.encode(chunk).tolist()
+                    collection.add(
+                        documents=[chunk],
+                        embeddings=[embedding],
+                        metadatas=[{"source": file}],
+                        ids=[f"doc_{doc_id}"]
+                    )
+                    doc_id += 1
 
-def search_docs(query: str, n_results: int = 3):
-    """Retrieves context matching the query."""
-    results = collection.query(query_texts=[query], n_results=n_results)
+def query_rag(query_text: str, top_k: int = 3):
+    query_emb = EMBED_MODEL.encode(query_text).tolist()
+    results = collection.query(query_embeddings=[query_emb], n_results=top_k)
     
-    retrieved_chunks = []
-    if results and results['documents']:
-        for doc, meta in zip(results['documents'][0], results['metadatas'][0]):
-            retrieved_chunks.append({
-                "content": doc,
-                "source": meta['source']
-            })
-    return retrieved_chunks
+    docs = results["documents"][0]
+    metas = results["metadatas"][0]
+    
+    context_str = ""
+    for doc, meta in zip(docs, metas):
+        context_str += f"[Source: {meta['source']}]\n{doc}\n\n"
+    return context_str

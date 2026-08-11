@@ -1,18 +1,53 @@
-from rag import search_docs
-from db import save_review_db
+import os
+import json
+from openai import OpenAI
+from dotenv import load_dotenv
+from app.rag import query_rag
 
-def check_rule(query: str) -> str:
-    """Tool 1: Searches product facts, writing rules, and QA rubric."""
-    results = search_docs(query, n_results=2)
-    if not results:
-        return "No relevant rule or fact found in reference docs."
+load_dotenv()
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY")
+)
+
+def run_document_review(draft_text: str):
+    context = query_rag(draft_text, top_k=5)
     
-    formatted = []
-    for r in results:
-        formatted.append(f"[Source: {r['source']}]\n{r['content']}")
-    return "\n\n".join(formatted)
+    prompt = f"""
+    You are a strict Document QA Reviewer. Check this draft text against reference rules.
+    Reference Facts and Rules:
+    {context}
 
-def save_review(session_id: str, status: str, issues: list, summary: str) -> str:
-    """Tool 2: Saves review results into SQLite database."""
-    save_review_db(session_id, status, issues, summary)
-    return f"Successfully saved review for session '{session_id}' to database."
+    Draft to Review:
+    {draft_text}
+
+    Return ONLY a clean JSON object with this exact structure:
+    {{
+      "status": "pass or needs_revision",
+      "summary": "Short explanation",
+      "issues": [
+        {{
+          "type": "Factual Error / Policy Violation",
+          "severity": "High / Medium / Low",
+          "reason": "Why it was flagged",
+          "source": "Name of source file"
+        }}
+      ]
+    }}
+    """
+
+    response = client.chat.completions.create(
+        model="meta-llama/llama-3.3-70b-instruct:free",
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    content = response.choices[0].message.content
+    
+    if "```json" in content:
+        content = content.split("```json")[1].split("```")[0].strip()
+    elif "```" in content:
+        content = content.split("```")[1].split("```")[0].strip()
+
+    parsed_json = json.loads(content)
+    return parsed_json
