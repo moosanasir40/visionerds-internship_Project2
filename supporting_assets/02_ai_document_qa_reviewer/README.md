@@ -1,33 +1,63 @@
-# AI Document QA Reviewer Assets
+# AI Document QA Reviewer (Capstone Project 02)
 
-Three fictional product families, detailed admin guides, shared policies, approved examples, and drafts with different kinds of issues.
+An intelligent quality assurance reviewer built with **FastAPI**, **ChromaDB**, **Sentence Transformers**, and **Groq (Llama 3.3)**. The system inspects draft product documentation against official product manuals, brand policies, and compliance rubrics to automatically detect factual errors, unsupported claims, and writing guideline violations.
 
-## Files in this folder
+---
 
-- `approved_content/01_novaflow_routing_rules.pdf`
-- `approved_content/02_novaflow_reporting.pdf`
-- `approved_content/03_ledgerlane_recurring_invoices.pdf`
-- `approved_content/04_ledgerlane_exports.pdf`
-- `approved_content/05_fieldtrack_offline.pdf`
-- `approved_content/06_fieldtrack_photos.pdf`
-- `drafts_to_review/01_novaflow_homepage_draft.pdf`
-- `drafts_to_review/02_novaflow_help_article_draft.pdf`
-- `drafts_to_review/03_ledgerlane_pricing_draft.pdf`
-- `drafts_to_review/04_ledgerlane_security_draft.pdf`
-- `drafts_to_review/05_fieldtrack_offline_draft.pdf`
-- `drafts_to_review/06_fieldtrack_media_draft.pdf`
-- `drafts_to_review/07_mixed_quality_draft.pdf`
-- `drafts_to_review/08_mixed_quality_draft.pdf`
-- `drafts_to_review/09_mixed_quality_draft.pdf`
-- `drafts_to_review/10_mixed_quality_draft.pdf`
-- `drafts_to_review/11_mixed_quality_draft.pdf`
-- `drafts_to_review/12_mixed_quality_draft.pdf`
-- `policies/01_brand_and_writing_guide.pdf`
-- `policies/02_security_and_compliance_claims_policy.pdf`
-- `policies/03_qa_rubric.pdf`
-- `product_docs/fieldtrack_admin_guide.pdf`
-- `product_docs/fieldtrack_product_manual.pdf`
-- `product_docs/ledgerlane_admin_guide.pdf`
-- `product_docs/ledgerlane_product_manual.pdf`
-- `product_docs/novaflow_cx_admin_guide.pdf`
-- `product_docs/novaflow_cx_product_manual.pdf`
+## 📌 Features
+
+- **Document QA Review Pipeline:** Automatically evaluates draft content and returns a strictly validated JSON structure with review status (`pass` / `needs_revision`), summaries, and itemized issues with severity levels.
+- **Retrieval-Augmented Generation (RAG):** Embeds and indexes official product guides, admin documentation, and compliance policies using `all-MiniLM-L6-v2` and ChromaDB.
+- **Conversational Memory & Follow-up Rewriting:** Retains chat history in SQLite and rewrites ambiguous follow-up questions into standalone search queries before querying the vector store.
+- **Tool / Action Invocations:** Features dedicated tools to verify standalone claims (`check_claim_tool`) and retrieve stored review states from SQLite (`load_saved_review_tool`).
+- **Multi-Path Request Routing:** Routes incoming chat requests across three separate paths: Action Tools, Document Search (RAG), and Standard Assistant Replies.
+- **Continuous Integration (CI):** Automated unit test suite run on every commit via GitHub Actions.
+
+---
+
+## 📁 Repository Structure
+
+```text
+.
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # GitHub Actions CI workflow
+├── app/
+│   ├── __init__.py
+│   ├── database.py                # SQLite persistence for reviews and chat logs
+│   ├── main.py                    # FastAPI application, routing, and endpoints
+│   ├── rag.py                     # ChromaDB vector store and query rewriting logic
+│   └── tools.py                   # Groq LLM integration, tools, and JSON validation
+├── supporting_assets/
+│   └── 02_ai_document_qa_reviewer/ # Provided reference PDFs
+├── tests/
+│   └── test_api.py                # Automated Pytest suite
+├── .env.example                   # Example environment variables template
+├── .gitignore                     # Git ignore file
+├── pytest.ini                     # Pytest configuration
+├── requirements.txt               # Project dependencies
+└── README.md                      # Documentation
+⚙️ Installation and Setup1. PrerequisitesPython 3.10+Groq API Key2. Clone the RepositoryBashgit clone [https://github.com/moosanasir40/visionerds-internship_Project2.git](https://github.com/moosanasir40/visionerds-internship_Project2.git)
+cd visionerds-internship_Project2
+3. Set Up Virtual EnvironmentBash# Windows
+python -m venv venv
+venv\Scripts\activate
+
+# macOS / Linux
+python3 -m venv venv
+source venv/bin/activate
+4. Install DependenciesBashpip install -r requirements.txt
+5. Environment VariablesCreate a .env file in the root folder:Code snippetGROQ_API_KEY=gsk_your_groq_api_key_here
+🚀 Running the ApplicationStart the FastAPI local development server:Bashuvicorn app.main:app --reload
+Interactive API documentation (Swagger UI) is available at:👉 http://127.0.0.1:8000/docs📡 API EndpointsMethodEndpointDescriptionPOST/reviewPerforms a full QA check on a draft text and saves the result to SQLite.POST/check-claimEvaluates a single specific claim or numeric metric against reference docs.POST/chatMulti-path conversational endpoint supporting tools, RAG lookups, and context memory.GET/history/{session_id}Retrieves the chronological chat history for a session.🧪 Running Tests & CIRun the automated test suite locally:Bashpython -m pytest
+GitHub Actions automatically executes this test suite on every push or pull_request to ensure system stability.🎬 Demo CasesCatch False Unlimited Retention Claim:Call POST /check-claim with "NovaFlow Starter plan provides unlimited reporting retention history."Result: Correctly identifies that the Starter plan is limited to 30 days of reporting history.Catch Unsupported 60% Cost Reduction Claim:Call POST /check-claim with "FieldTrack Ops guarantees a 60 percent reduction in maintenance costs."Result: Flags the statement as an unsupported numerical claim per the Brand and Writing Guide.Verify Valid Content:Call POST /review with accurate facts from the LedgerLane billing guide.Result: Returns "status": "pass" without false positive flags.Conversational Follow-up with Source Attribution:Call POST /chat with "Why was the retention claim flagged and what is the source?"Result: Rewrites query using conversation memory and returns source citations from official documents.Load Review State (Tool Invocation):Call POST /chat with "load review" using an existing session_id.Result: Invokes the SQLite action tool to return the previously saved QA report.
+---
+
+### Push your documentation to GitHub
+
+Run these commands in your VS Code terminal to commit and push your new documentation:
+
+```cmd
+git add README.md
+git commit -m "docs: add comprehensive README with architecture, setup, and demo instructions"
+git push origin main
