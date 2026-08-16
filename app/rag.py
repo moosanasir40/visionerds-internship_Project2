@@ -12,8 +12,8 @@ chroma_client = chromadb.Client()
 collection = chroma_client.get_or_create_collection(name="qa_reference_docs")
 
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY")
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.getenv("GROQ_API_KEY", "")
 )
 
 def load_documents(folder_path: str = "supporting_assets/02_ai_document_qa_reviewer"):
@@ -69,7 +69,7 @@ def rewrite_query_if_vague(user_query: str, chat_history_text: str) -> str:
 
     try:
         response = client.chat.completions.create(
-            model="meta-llama/llama-3.3-70b-instruct:free",
+            model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=60
         )

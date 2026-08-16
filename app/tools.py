@@ -7,17 +7,33 @@ from app.database import get_review_from_db
 
 load_dotenv()
 
+groq_api_key = os.getenv("GROQ_API_KEY", "")
+
+# Point the OpenAI client to Groq's API
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY")
+    base_url="https://api.groq.com/openai/v1",
+    api_key=groq_api_key
 )
+
+def call_groq(messages: list, temperature: float = 0.1) -> str:
+    """Helper to call Groq's high-speed Llama models."""
+    if not groq_api_key or "your_" in groq_api_key:
+        raise ValueError("Missing or invalid GROQ_API_KEY in .env file.")
+
+    # Using Groq's fast Llama 3.3 model
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=messages,
+        temperature=temperature
+    )
+    return response.choices[0].message.content.strip()
 
 def check_claim_tool(claim_text: str) -> dict:
     """Tool: Validates a single specific statement/claim against reference documents."""
     context = query_rag(claim_text, top_k=3)
     
     prompt = f"""
-    You are an AI Compliance & QA Specialist. Validate if the claim is supported or false.
+    You are an AI Compliance & QA Specialist. Validate if the claim is supported or false according to official documentation.
     
     Reference Guidelines:
     {context}
@@ -25,16 +41,14 @@ def check_claim_tool(claim_text: str) -> dict:
     Claim to Verify:
     "{claim_text}"
     
-    Analyze the claim against the facts. Respond clearly whether it is valid or violates policy, citing the source document.
+    Analyze the claim directly. State clearly whether it is valid or violates policy, and cite the source document.
     """
     
-    response = client.chat.completions.create(
-        model="meta-llama/llama-3.3-70b-instruct:free",
-        messages=[{"role": "user", "content": prompt}]
-    )
+    evaluation = call_groq([{"role": "user", "content": prompt}])
+    
     return {
         "claim": claim_text,
-        "evaluation": response.choices[0].message.content.strip(),
+        "evaluation": evaluation,
         "reference_sources": context
     }
 
@@ -55,7 +69,7 @@ def run_document_review(draft_text: str) -> dict:
     You are an AI Document QA Reviewer. Review the provided draft against official product facts, writing guidelines, and QA rubric.
     
     Rules:
-    1. Flag factual errors (e.g. false feature limits or unsupported numerical claims).
+    1. Flag factual errors (e.g., false feature limits or unsupported numerical claims).
     2. Flag compliance/security policy violations.
     3. Do NOT flag text that is factually accurate and compliant.
     4. Set status to 'pass' if no major issues, or 'needs_revision' if issues exist.
@@ -66,9 +80,9 @@ def run_document_review(draft_text: str) -> dict:
     Draft to Review:
     {draft_text}
 
-    Return ONLY a raw JSON object (no markdown, no extra commentary) matching this schema:
+    Return ONLY a raw JSON object matching this schema:
     {{
-      "status": "pass" or "needs_revision",
+      "status": "pass or needs_revision",
       "summary": "High level review summary",
       "issues": [
         {{
@@ -81,33 +95,24 @@ def run_document_review(draft_text: str) -> dict:
     }}
     """
 
-    response = client.chat.completions.create(
-        model="meta-llama/llama-3.3-70b-instruct:free",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1
-    )
-
-    content = response.choices[0].message.content.strip()
+    content = call_groq([{"role": "user", "content": prompt}], temperature=0.1)
     
-    # Strip markdown wrappers if returned
     if "```json" in content:
         content = content.split("```json")[1].split("```")[0].strip()
     elif "```" in content:
         content = content.split("```")[1].split("```")[0].strip()
 
-    # Code validation on JSON output
     try:
         parsed_json = json.loads(content)
-        # Ensure mandatory keys exist
         if "status" not in parsed_json or "issues" not in parsed_json:
             raise ValueError("Missing mandatory keys in review JSON")
         return parsed_json
     except Exception as e:
         return {
             "status": "needs_revision",
-            "summary": f"Automated review completed with formatting fallback: {str(e)}",
+            "summary": f"Review completed with formatting fallback: {str(e)}",
             "issues": [{
-                "type": "Parsing Check",
+                "type": "Formatting Check",
                 "severity": "Low",
                 "reason": content,
                 "source": "Model Output"

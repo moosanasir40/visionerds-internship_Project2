@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -11,21 +12,23 @@ from app.database import (
 from app.rag import load_documents, query_rag, rewrite_query_if_vague
 from app.tools import run_document_review, check_claim_tool, load_saved_review_tool
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    load_documents()
+    yield
+
 app = FastAPI(
     title="AI Document QA Reviewer API",
     description="Automated QA review agent using RAG and rule enforcement",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
-@app.on_event("startup")
-def startup_event():
-    init_db()
-    load_documents()
-
-# Pydantic Schemas
+# Pydantic Schemas (Updated for Pydantic V2)
 class ChatRequest(BaseModel):
-    session_id: str = Field(..., example="qa-session-001")
-    message: str = Field(..., example="Why was issue 1 flagged?")
+    session_id: str = Field(..., json_schema_extra={"example": "qa-session-001"})
+    message: str = Field(..., json_schema_extra={"example": "Why was issue 1 flagged?"})
 
 class ChatResponse(BaseModel):
     session_id: str
@@ -33,28 +36,19 @@ class ChatResponse(BaseModel):
     path_taken: str
 
 class ReviewRequest(BaseModel):
-    session_id: str = Field(..., example="qa-session-001")
+    session_id: str = Field(..., json_schema_extra={"example": "qa-session-001"})
     document_name: Optional[str] = "draft_to_review.pdf"
     document_text: str
 
 class ClaimCheckRequest(BaseModel):
-    claim: str = Field(..., example="NovaFlow Starter plan includes unlimited reporting history.")
-
-# Endpoints
+    claim: str = Field(..., json_schema_extra={"example": "NovaFlow Starter plan includes unlimited reporting history."})
 
 @app.post("/chat", response_model=ChatResponse)
 def chat_endpoint(req: ChatRequest):
-    """
-    Handles conversational interactions across 3 execution paths:
-    Path 1: Tool / Action Execution (load review)
-    Path 2: RAG Search with Query Rewriting (why, source, rule queries)
-    Path 3: Normal conversational reply
-    """
     try:
         msg_clean = req.message.strip()
         msg_lower = msg_clean.lower()
         
-        # Fetch conversation memory
         history = get_chat_history(req.session_id)
         history_text = "\n".join([f"{h['role']}: {h['message']}" for h in history])
 
@@ -65,7 +59,6 @@ def chat_endpoint(req: ChatRequest):
 
         # Path 2: Document Search / Follow-up Q&A
         elif any(keyword in msg_lower for keyword in ["why", "source", "rule", "policy", "explain", "flag", "evidence"]):
-            # Rewrite query if it depends on conversation context
             standalone_query = rewrite_query_if_vague(msg_clean, history_text)
             context = query_rag(standalone_query, top_k=3)
             reply = f"Here is the relevant source rule and evidence:\n\n{context}"
@@ -80,7 +73,6 @@ def chat_endpoint(req: ChatRequest):
             )
             path = "normal_reply"
 
-        # Save to SQLite conversation memory
         save_chat_message(req.session_id, "user", req.message)
         save_chat_message(req.session_id, "assistant", reply)
 
@@ -91,10 +83,8 @@ def chat_endpoint(req: ChatRequest):
 
 @app.post("/review")
 def review_endpoint(req: ReviewRequest):
-    """Performs QA checks on draft text, stores issues in SQLite, and returns JSON."""
     try:
         result = run_document_review(req.document_text)
-        
         save_review_to_db(
             session_id=req.session_id,
             doc_name=req.document_name or "draft_doc",
@@ -108,7 +98,6 @@ def review_endpoint(req: ReviewRequest):
 
 @app.post("/check-claim")
 def check_claim_endpoint(req: ClaimCheckRequest):
-    """Tool-powered endpoint to quickly verify a single statement."""
     try:
         return check_claim_tool(req.claim)
     except Exception as e:
@@ -116,5 +105,4 @@ def check_claim_endpoint(req: ClaimCheckRequest):
 
 @app.get("/history/{session_id}")
 def get_history_endpoint(session_id: str):
-    """Retrieve chat history for a session."""
     return {"session_id": session_id, "history": get_chat_history(session_id)}
